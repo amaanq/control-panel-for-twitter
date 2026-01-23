@@ -2,10 +2,10 @@ const fs = require('fs')
 
 const semver = require('semver')
 
-const manifestPaths = ['./manifest.mv2.json', './manifest.mv3.json', './Safari/Shared (Extension)/Resources/manifest.json']
+const manifestPaths = ['./manifest.mv2.json', './manifest.mv3.json', './safari/Shared (Extension)/Resources/manifest.json']
 const optionsJsPath = './options.js'
 const optionsHtmlPath = './options.html'
-const safariProjectPath = './Safari/Control Panel for Twitter.xcodeproj/project.pbxproj'
+const safariProjectPath = './safari/Control Panel for Twitter.xcodeproj/project.pbxproj'
 
 let releaseType = process.argv[2]
 
