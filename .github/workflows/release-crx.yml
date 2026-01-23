@@ -1,0 +1,104 @@
+name: Build and Release CRX
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install web-ext and crx3
+        run: npm install -g web-ext crx3
+
+      - name: Create browser_action.html
+        run: npm run create-browser-action
+
+      - name: Build MV3
+        run: npm run build-mv3
+
+      - name: Write extension key
+        run: echo "${{ secrets.EXTENSION_KEY }}" | base64 -d > extension.pem
+
+      - name: Get version from manifest
+        id: version
+        run: |
+          VERSION=$(jq -r '.version' manifest.mv3.json)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Extract and pack CRX
+        run: |
+          cd web-ext-artifacts
+          unzip "control_panel_for_twitter-${{ steps.version.outputs.version }}.mv3.zip" -d unpacked
+          cd ..
+          crx3 pack web-ext-artifacts/unpacked -o control-panel-for-twitter.crx -p extension.pem
+
+      - name: Get Extension ID
+        id: extid
+        run: |
+          EXTID=$(python3 << 'PYEOF'
+          import hashlib, subprocess
+          der = subprocess.run(['openssl', 'rsa', '-in', 'extension.pem', '-pubout', '-outform', 'DER'],
+                               capture_output=True).stdout
+          digest = hashlib.sha256(der).digest()[:16]
+          print(''.join(chr(ord('a') + (b >> 4)) + chr(ord('a') + (b & 0xf)) for b in digest))
+          PYEOF
+          )
+          echo "extid=$EXTID" >> $GITHUB_OUTPUT
+
+      - name: Generate update manifest
+        env:
+          EXTID: ${{ steps.extid.outputs.extid }}
+          VERSION: ${{ steps.version.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          cat > updates.xml << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <gupdate xmlns="http://www.google.com/update2/response" protocol="2.0">
+            <app appid="${EXTID}">
+              <updatecheck codebase="https://github.com/${REPO}/releases/download/v${VERSION}/control-panel-for-twitter.crx" version="${VERSION}"/>
+            </app>
+          </gupdate>
+          EOF
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            control-panel-for-twitter.crx
+            updates.xml
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Control Panel for Twitter v${{ steps.version.outputs.version }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update latest release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EXTID: ${{ steps.extid.outputs.extid }}
+          VERSION: ${{ steps.version.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          cat > updates.xml << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <gupdate xmlns="http://www.google.com/update2/response" protocol="2.0">
+            <app appid="${EXTID}">
+              <updatecheck codebase="https://github.com/${REPO}/releases/latest/download/control-panel-for-twitter.crx" version="${VERSION}"/>
+            </app>
+          </gupdate>
+          EOF
+          gh release upload latest updates.xml control-panel-for-twitter.crx --clobber 2>/dev/null || gh release create latest updates.xml control-panel-for-twitter.crx -t "Latest Release" -n "Latest stable release"
