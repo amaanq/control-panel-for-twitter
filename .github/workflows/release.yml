@@ -20,6 +20,9 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Create browser_action.html
+        run: npm run create-browser-action
+
       - name: Build extension
         run: npm run build-mv3
 
